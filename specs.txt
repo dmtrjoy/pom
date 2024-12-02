@@ -1,0 +1,40 @@
+===
+What should this tool do?
+===
+
+1. Create new projects
+2. Add items to existing projects
+3. Categorize items by due date, priority, topic, timestamp, etc.
+4. Complete items
+5. Allow different kinds of items
+    - Tasks (-t): To-do items with deadlines, priority, etc.
+    - Logs (-l): Records of what has been completed today
+    - Notes (-n): Nuggets of useful information
+
+
+===
+Example use cases
+===
+
+---
+Example 1
+---
+Create a new project.
+--- 
+
+pom new myproject
+
+Creating new project 'myproject'
+Done!
+
+---
+Example 2
+---
+Add an item to existing project.
+---
+
+pom new myproject
+
+pom add -t "Finish the design"
+
+pom overdue

@@ -1,0 +1,10 @@
+[package]
+name = "pom"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+clap = { version = "4.0", features = ["derive"] }
+directories = "5.0.1"
+rusqlite = "0.32.1"
+uuid  = { version = "1.11.0", features = ["v4"] }
