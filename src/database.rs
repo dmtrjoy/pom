@@ -11,7 +11,7 @@ impl Database {
 
     pub fn new() -> Self {
         // Read the local data path.
-        let project_dirs = ProjectDirs::from("com", "Root", "pom").unwrap();
+        let project_dirs = ProjectDirs::from("com", "ode", "pom").unwrap();
         let local_data_path = project_dirs.data_local_dir();
 
         // Create the directory if necessary.
@@ -19,7 +19,7 @@ impl Database {
             fs::create_dir(&local_data_path).unwrap();
         }
 
-        // Read the database path.
+        // Construct the database path.
         let database_path = format!("{}/{}", local_data_path.display(), Self::DATABASE_NAME);
 
         Self { database_path }
