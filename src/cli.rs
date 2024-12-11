@@ -1,5 +1,6 @@
 use crate::project::{Project, ProjectDao};
 use crate::task::{Priority, Status, Task, TaskDao};
+use chrono::{NaiveDateTime, Utc};
 use clap::{Parser, Subcommand};
 use rusqlite::Connection;
 //use crate::session::{Session, SessionDao};
@@ -35,7 +36,6 @@ pub enum Command {
 /// Create and manage projects, set timers, and more!
 #[derive(Parser)]
 #[command(version, long_about)]
-#[command(propagate_version = true)]
 pub struct Args {
     #[command(subcommand)]
     command: Command,
@@ -58,8 +58,15 @@ impl<'a> Cli<'a> {
 
     pub fn interpret(&self, args: Args) {
         match args.command() {
-            Command::Do { what, priority, status, due_date } => {
-                let task = Task::new(what);
+            Command::Do {
+                what,
+                priority,
+                status,
+                due_date,
+            } => {
+                let creation_epoch = Utc::now();
+                let due_date_epoch = Utc::now();
+                let task = Task::new(what, priority, status, creation_epoch, due_date_epoch);
                 let task_dao = TaskDao::new(&self.conn);
                 task_dao.add(&task);
             }
@@ -81,5 +88,3 @@ impl<'a> Cli<'a> {
         }
     }
 }
-
-
