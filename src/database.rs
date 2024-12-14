@@ -12,15 +12,15 @@ impl Database {
     pub fn new() -> Self {
         // Read the local data path.
         let project_dirs = ProjectDirs::from("com", "ode", "pom").unwrap();
-        let local_data_path = project_dirs.data_local_dir();
+        let data_path = project_dirs.data_dir();
 
         // Create the directory if necessary.
-        if !fs::exists(&local_data_path).unwrap() {
-            fs::create_dir(&local_data_path).unwrap();
+        if !fs::exists(&data_path).unwrap() {
+            fs::create_dir_all(&data_path).unwrap();
         }
 
         // Construct the database path.
-        let database_path = format!("{}/{}", local_data_path.display(), Self::DATABASE_NAME);
+        let database_path = format!("{}/{}", data_path.display(), Self::DATABASE_NAME);
 
         Self { database_path }
     }
