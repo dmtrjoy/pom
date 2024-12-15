@@ -1,9 +1,10 @@
-use directories::ProjectDirs;
-use rusqlite::Connection;
 use std::{
     fs,
     path::{Path, PathBuf},
 };
+
+use directories::ProjectDirs;
+use rusqlite::Connection;
 
 /// Represents a local database reference for storing projects, tasks, and more.
 pub struct Database {
@@ -29,7 +30,7 @@ impl Database {
         Self { database_path }
     }
 
-    /// Opens and returns a reference to the database connection.
+    /// Opens and borrows the database connection.
     pub fn conn(&self) -> Connection {
         Connection::open(&self.database_path).expect("failed to open database connection")
     }

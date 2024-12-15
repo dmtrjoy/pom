@@ -1,4 +1,4 @@
-use chrono::{DateTime, TimeZone, Utc};
+use chrono::{DateTime, Local, TimeZone, Utc};
 use clap::ValueEnum;
 use rusqlite::{params, Connection};
 use uuid::Uuid;
@@ -53,8 +53,8 @@ pub struct Task {
     what: String,
     priority: Priority,
     status: Status,
-    creation_epoch: DateTime<Utc>,
-    due_date_epoch: DateTime<Utc>,
+    creation_date: DateTime<Local>,
+    due_date: DateTime<Local>,
     project_uuid: Uuid,
 }
 
@@ -65,8 +65,8 @@ impl Task {
         what: String,
         priority: Priority,
         status: Status,
-        creation_epoch: DateTime<Utc>,
-        due_date_epoch: DateTime<Utc>,
+        creation_date: DateTime<Local>,
+        due_date: DateTime<Local>,
         project_uuid: Uuid,
     ) -> Self {
         // Generate a unique task identifer based on the current timestamp.
@@ -77,15 +77,20 @@ impl Task {
             what,
             priority,
             status,
-            creation_epoch,
-            due_date_epoch,
+            creation_date,
+            due_date,
             project_uuid,
         )
     }
 
-    /// Returns the task objective.
+    /// Borrows the task objective.
     pub fn what(&self) -> &String {
         &self.what
+    }
+
+    /// Borrows the due date.
+    pub fn due_date(&self) -> &DateTime<Local> {
+        &self.due_date
     }
 
     /// Constructs a new task.
@@ -94,8 +99,8 @@ impl Task {
         what: String,
         priority: Priority,
         status: Status,
-        creation_epoch: DateTime<Utc>,
-        due_date_epoch: DateTime<Utc>,
+        creation_date: DateTime<Local>,
+        due_date: DateTime<Local>,
         project_uuid: Uuid,
     ) -> Self {
         Self {
@@ -103,8 +108,8 @@ impl Task {
             what,
             priority,
             status,
-            creation_epoch,
-            due_date_epoch,
+            creation_date,
+            due_date,
             project_uuid,
         }
     }
@@ -127,6 +132,11 @@ impl<'a> TaskDao<'a> {
 
     /// Adds a new task to the `task` table.
     pub fn add(&self, task: &Task) {
+        // All datetimes are stored in UTC and converted to the local timezone when interpreting
+        // commands.
+        let creation_date_utc: DateTime<Utc> = DateTime::from(task.creation_date);
+        let due_date_utc: DateTime<Utc> = DateTime::from(task.due_date);
+
         self.conn
             .execute(
                 "INSERT INTO task (
@@ -143,8 +153,8 @@ impl<'a> TaskDao<'a> {
                     task.what,
                     task.priority as i64,
                     task.status as i64,
-                    task.creation_epoch.timestamp(),
-                    task.due_date_epoch.timestamp(),
+                    creation_date_utc.timestamp(),
+                    due_date_utc.timestamp(),
                     task.project_uuid
                 ],
             )
@@ -178,8 +188,8 @@ impl<'a> TaskDao<'a> {
                     row.get(1)?,
                     Priority::from_i64(row.get(2)?),
                     Status::from_i64(row.get(3)?),
-                    Utc.timestamp_opt(row.get(4)?, 0).unwrap(),
-                    Utc.timestamp_opt(row.get(5)?, 0).unwrap(),
+                    DateTime::from(Utc.timestamp_opt(row.get(4)?, 0).unwrap()),
+                    DateTime::from(Utc.timestamp_opt(row.get(5)?, 0).unwrap()),
                     row.get(6)?,
                 ))
             })

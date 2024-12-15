@@ -1,9 +1,15 @@
+use std::collections::BTreeMap;
+
+use chrono::{Local, NaiveDate, NaiveDateTime, TimeZone};
+use clap::{
+    builder::{styling::Ansi256Color, Styles},
+    Parser, Subcommand,
+};
+
 use crate::database::Database;
 use crate::project::{Project, ProjectDao};
 use crate::session::{Entry, Key, Session};
 use crate::task::{Priority, Status, Task, TaskDao};
-use chrono::{DateTime, Local, NaiveDateTime, TimeZone, Utc};
-use clap::{Parser, builder::{Styles, styling::Ansi256Color}, Subcommand};
 
 const STYLES: Styles = Styles::styled()
     .header(Ansi256Color(47).on_default())
@@ -79,15 +85,12 @@ impl Cli {
             } => {
                 // Parse the due date as a local datetime.
                 let due_datetime = due_date + "00:00:00"; // Due at midnight.
-                let naive_due_date_epoch = NaiveDateTime::parse_from_str(&due_datetime, "%m-%d-%Y %H:%M:%S")
-                    .expect("failed to parse due date");
-                let local_due_date_epoch =
-                    Local.from_local_datetime(&naive_due_date_epoch).unwrap();
+                let naive_due_date_epoch =
+                    NaiveDateTime::parse_from_str(&due_datetime, "%m-%d-%Y %H:%M:%S")
+                        .expect("failed to parse due date");
 
-                // Convert datetimes to UTC before saving. All datetimes are stored in UTC and
-                // converted to the local timezone when interpreting commands.
-                let creation_epoch = Utc::now();
-                let due_date_epoch = DateTime::from(local_due_date_epoch);
+                let creation_epoch = Local::now();
+                let due_date_epoch = Local.from_local_datetime(&naive_due_date_epoch).unwrap();
 
                 // Get the active project, which the newly created task belongs to.
                 let project_uuid = session.get(Key::ActiveProject);
@@ -121,7 +124,7 @@ impl Cli {
                 let project_dao = ProjectDao::new(&conn);
                 let projects = project_dao.all();
 
-                // Print all projects, distinguishing the active project. 
+                // Print all projects, distinguishing the active project.
                 for project in projects {
                     if project.uuid().eq(&project_uuid) {
                         println!("* {}", project.name());
@@ -146,9 +149,32 @@ impl Cli {
                 let task_dao = TaskDao::new(&conn);
                 let tasks = task_dao.all(project_uuid);
 
-                // Print all tasks that belong to the active project.
+                // Group tasks by naive due date (no notion of time zone).
+                let mut tasks_grouped_by_due_date = BTreeMap::<NaiveDate, Vec<Task>>::new();
                 for task in tasks {
-                    println!("{}", task.what());
+                    let naive_due_date = task.due_date().date_naive();
+                    if tasks_grouped_by_due_date.contains_key(&naive_due_date) {
+                        tasks_grouped_by_due_date
+                            .entry(naive_due_date)
+                            .and_modify(|tasks| tasks.push(task));
+                    } else {
+                        tasks_grouped_by_due_date.insert(naive_due_date, Vec::<Task>::from([task]));
+                    }
+                }
+
+                // Print all tasks that belong to the active project.
+                let mut naive_due_date_idx = 0;
+                for (naive_due_date, tasks) in tasks_grouped_by_due_date.iter().rev() {
+                    println!("\x1b[38;5;47m{}\x1b[0m", naive_due_date);
+                    let mut task_idx = 0;
+                    for task in tasks {
+                        println!("{}. {}", task_idx, task.what());
+                        task_idx += 1;
+                    }
+                    if naive_due_date_idx != tasks_grouped_by_due_date.len() - 1 {
+                        println!("");
+                    }
+                    naive_due_date_idx += 1;
                 }
             }
         }

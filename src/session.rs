@@ -14,12 +14,12 @@ impl Entry {
         Self { key, value_uuid }
     }
 
-    /// Returns the session key.
+    /// Borrows the session key.
     pub fn key(&self) -> Key {
         self.key
     }
 
-    /// Returns the session value ID, which maps to the primary key
+    /// Borrows the session value ID, which maps to the primary key
     pub fn value_uuid(&self) -> &Uuid {
         &self.value_uuid
     }
