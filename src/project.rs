@@ -17,17 +17,17 @@ impl Project {
         Self::new_impl(uuid, name)
     }
 
-    /// Returns the unique project identifier.
+    /// Borrows the unique project identifier.
     pub fn uuid(&self) -> &Uuid {
         &self.uuid
     }
 
-    /// Returns the project name.
+    /// Borrows the project name.
     pub fn name(&self) -> &String {
         &self.name
     }
 
-    /// Returns and transfers ownership of the unique project identifier.
+    /// Transfers ownership of the unique project identifier.
     pub fn take_uuid(&self) -> Uuid {
         self.uuid
     }
@@ -94,7 +94,8 @@ impl<'a> ProjectDao<'a> {
             .prepare(
                 "SELECT uuid, name
                 FROM    project
-                WHERE   name = ?1")
+                WHERE   name = ?1",
+            )
             .expect("failed to prepare fetch-project statement");
 
         // Fetch the specified project.
