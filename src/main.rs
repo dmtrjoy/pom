@@ -1,4 +1,5 @@
 mod cli;
+mod color;
 mod database;
 mod project;
 mod session;
