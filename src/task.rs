@@ -3,6 +3,8 @@ use clap::ValueEnum;
 use rusqlite::{params, Connection};
 use uuid::Uuid;
 
+use crate::color::{Color, Foreground};
+
 /// Represents possible task priorities.
 #[derive(Clone, Copy, ValueEnum)]
 pub enum Priority {
@@ -12,8 +14,29 @@ pub enum Priority {
     Critical = 3,
 }
 
-/// Priotiy implementation.
+/// Priority implementation.
 impl Priority {
+    /// Maps the priority to the corresponding rich display representation,
+    /// including colors, formatting, and sizing.
+    pub fn as_display(&self) -> String {
+        match self {
+            Priority::Low => Foreground::color(&self.as_str().to_string(), Color::LightGreen),
+            Priority::Medium => Foreground::color(&self.as_str().to_string(), Color::Yellow),
+            Priority::High => Foreground::color(&self.as_str().to_string(), Color::Red),
+            Priority::Critical => Foreground::color(&self.as_str().to_string(), Color::BrightRed),
+        }
+    }
+
+    /// Maps the priority to the corresponding string representation.
+    pub fn as_str(&self) -> &str {
+        match self {
+            Priority::Low => "low",
+            Priority::Medium => "medium",
+            Priority::High => "high",
+            Priority::Critical => "critical",
+        }
+    }
+
     /// Maps a 64-bit integer to the corresponding `Priority` enum.
     pub fn from_i64(value: i64) -> Priority {
         match value {
@@ -30,18 +53,56 @@ impl Priority {
 #[derive(Clone, Copy, ValueEnum)]
 pub enum Status {
     NotStarted = 0,
-    Complete = 1,
-    Blocked = 2,
+    InProgress = 1,
+    Completed = 2,
+    Blocked = 3,
+    Overdue = 4,
 }
 
 /// Status implementation.
 impl Status {
+    /// Maps the priority to the corresponding rich display representation,
+    /// including colors, formatting, and sizing.
+    pub fn as_display(&self) -> String {
+        match self {
+            Status::NotStarted => Foreground::color(&self.as_str().to_string(), self.color()),
+            Status::InProgress => Foreground::color(&self.as_str().to_string(), self.color()),
+            Status::Completed => Foreground::color(&self.as_str().to_string(), self.color()),
+            Status::Blocked => Foreground::color(&self.as_str().to_string(), self.color()),
+            Status::Overdue => Foreground::color(&self.as_str().to_string(), self.color()),
+        }
+    }
+
+    /// Maps the status to the corresponding string representation.
+    pub fn as_str(&self) -> &str {
+        match self {
+            Status::NotStarted => "not-started",
+            Status::InProgress => "in-progress",
+            Status::Completed => "completed",
+            Status::Blocked => "blocked",
+            Status::Overdue => "overdue",
+        }
+    }
+
+    /// Copies the status color.
+    pub fn color(&self) -> Color {
+        match self {
+            Status::NotStarted => Color::Blue,
+            Status::InProgress => Color::Orange,
+            Status::Completed => Color::Green,
+            Status::Blocked => Color::Red,
+            Status::Overdue => Color::BrightRed,
+        }
+    }
+
     /// Maps a 64-bit integer to the corresponding `Status` enum.
     fn from_i64(value: i64) -> Status {
         match value {
             0 => Self::NotStarted,
-            1 => Self::Complete,
-            2 => Self::Blocked,
+            1 => Self::InProgress,
+            2 => Self::Completed,
+            3 => Self::Blocked,
+            4 => Self::Overdue,
             _ => panic!("unknown status: `{}`", value),
         }
     }
@@ -83,6 +144,11 @@ impl Task {
         )
     }
 
+    /// Borrows the unique task identifier.
+    pub fn uuid(&self) -> &Uuid {
+        &self.uuid
+    }
+
     /// Borrows the task objective.
     pub fn what(&self) -> &String {
         &self.what
@@ -91,6 +157,16 @@ impl Task {
     /// Borrows the due date.
     pub fn due_date(&self) -> &DateTime<Local> {
         &self.due_date
+    }
+
+    /// Copies the status.
+    pub fn status(&self) -> Status {
+        self.status
+    }
+
+    /// Copies the priority.
+    pub fn priority(&self) -> Priority {
+        self.priority
     }
 
     /// Constructs a new task.

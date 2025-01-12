@@ -6,6 +6,7 @@ use clap::{
     Parser, Subcommand,
 };
 
+use crate::color::{Color, Foreground};
 use crate::database::Database;
 use crate::project::{Project, ProjectDao};
 use crate::session::{Entry, Key, Session};
@@ -35,7 +36,7 @@ pub enum Command {
     #[command(color = clap::ColorChoice::Always, long_about)]
     New { name: String },
 
-    /// List, modify, or delete projects
+    /// Show or modify projects
     #[command(long_about)]
     Project,
 
@@ -83,39 +84,10 @@ impl Cli {
                 status,
                 due_date,
             } => {
-                // Parse the due date as a local datetime.
-                let due_datetime = due_date + "00:00:00"; // Due at midnight.
-                let naive_due_date_epoch =
-                    NaiveDateTime::parse_from_str(&due_datetime, "%m-%d-%Y %H:%M:%S")
-                        .expect("failed to parse due date");
-
-                let creation_epoch = Local::now();
-                let due_date_epoch = Local.from_local_datetime(&naive_due_date_epoch).unwrap();
-
-                // Get the active project, which the newly created task belongs to.
-                let project_uuid = session.get(Key::ActiveProject);
-
-                // Construct and save the task.
-                let task = Task::new(
-                    what,
-                    priority,
-                    status,
-                    creation_epoch,
-                    due_date_epoch,
-                    project_uuid,
-                );
-                let task_dao = TaskDao::new(&conn);
-                task_dao.add(&task);
+                Self::add_task(what, priority, status, due_date);
             }
             Command::New { name } => {
-                // Create and add a new project to the database.
-                let project = Project::new(name);
-                let project_dao = ProjectDao::new(&conn);
-                project_dao.add(&project);
-
-                // Update the active project.
-                let entry: Entry = Entry::new(Key::ActiveProject, project.take_uuid());
-                session.set(entry);
+                Self::add_project(name);
             }
             Command::Project => {
                 // Get the active project.
@@ -127,9 +99,9 @@ impl Cli {
                 // Print all projects, distinguishing the active project.
                 for project in projects {
                     if project.uuid().eq(&project_uuid) {
-                        println!("* {}", project.name());
+                        println!("-> {}", project.name());
                     } else {
-                        println!("  {}", project.name());
+                        println!("   {}", project.name());
                     }
                 }
             }
@@ -143,40 +115,107 @@ impl Cli {
                 session.set(entry);
             }
             Command::Task => {
-                // Get the active project.
-                let project_uuid = session.get(Key::ActiveProject);
+                Self::display_tasks();
+            }
+        }
+    }
 
-                let task_dao = TaskDao::new(&conn);
-                let tasks = task_dao.all(project_uuid);
+    /// Creates a new project.
+    fn add_project(name: String) {
+        // Open the database connection. Shared across all data access objects.
+        let database = Database::new();
+        let conn = database.conn();
 
-                // Group tasks by naive due date (no notion of time zone).
-                let mut tasks_grouped_by_due_date = BTreeMap::<NaiveDate, Vec<Task>>::new();
-                for task in tasks {
-                    let naive_due_date = task.due_date().date_naive();
-                    if tasks_grouped_by_due_date.contains_key(&naive_due_date) {
-                        tasks_grouped_by_due_date
-                            .entry(naive_due_date)
-                            .and_modify(|tasks| tasks.push(task));
-                    } else {
-                        tasks_grouped_by_due_date.insert(naive_due_date, Vec::<Task>::from([task]));
-                    }
-                }
+        // Load persistent session data.
+        let session = Session::new(&conn);
 
-                // Print all tasks that belong to the active project.
-                let mut naive_due_date_idx = 0;
-                for (naive_due_date, tasks) in tasks_grouped_by_due_date.iter().rev() {
-                    println!("\x1b[38;5;47m{}\x1b[0m", naive_due_date);
-                    let mut task_idx = 0;
-                    for task in tasks {
-                        println!("{}. {}", task_idx, task.what());
-                        task_idx += 1;
-                    }
-                    if naive_due_date_idx != tasks_grouped_by_due_date.len() - 1 {
-                        println!("");
-                    }
-                    naive_due_date_idx += 1;
+        // Create and add a new project to the database.
+        let project = Project::new(name);
+        let project_dao = ProjectDao::new(&conn);
+        project_dao.add(&project);
+
+        // Update the active project.
+        let entry: Entry = Entry::new(Key::ActiveProject, project.take_uuid());
+        session.set(entry);
+    }
+
+    /// Adds a task to the active project.
+    fn add_task(what: String, priority: Priority, status: Status, due_date: String) {
+        // Open the database connection. Shared across all data access objects.
+        let database = Database::new();
+        let conn = database.conn();
+
+        // Load persistent session data.
+        let session = Session::new(&conn);
+
+        // Parse the due date as a local datetime.
+        let due_datetime = due_date + "00:00:00"; // Due at midnight.
+        let naive_due_date_epoch =
+            NaiveDateTime::parse_from_str(&due_datetime, "%m-%d-%Y %H:%M:%S")
+                .expect("failed to parse due date");
+
+        let creation_epoch = Local::now();
+        let due_date_epoch = Local.from_local_datetime(&naive_due_date_epoch).unwrap();
+
+        // Get the active project, which the newly created task belongs to.
+        let project_uuid = session.get(Key::ActiveProject);
+
+        // Construct and save the task.
+        let task = Task::new(
+            what,
+            priority,
+            status,
+            creation_epoch,
+            due_date_epoch,
+            project_uuid,
+        );
+        let task_dao = TaskDao::new(&conn);
+        task_dao.add(&task);
+    }
+
+    /// Displays all tasks that belong to the active project.
+    fn display_tasks() {
+        // Open the database connection. Shared across all data access objects.
+        let database = Database::new();
+        let conn = database.conn();
+
+        // Load persistent session data.
+        let session = Session::new(&conn);
+
+        // Get the active project and its tasks.
+        let project_uuid = session.get(Key::ActiveProject);
+        let task_dao = TaskDao::new(&conn);
+        let tasks = task_dao.all(project_uuid);
+
+        // Group tasks by naive due date (no notion of time zone).
+        let mut tasks_grouped_by_due_date = BTreeMap::<NaiveDate, Vec<Task>>::new();
+        for task in tasks {
+            let naive_due_date = task.due_date().date_naive();
+            if tasks_grouped_by_due_date.contains_key(&naive_due_date) {
+                tasks_grouped_by_due_date
+                    .entry(naive_due_date)
+                    .and_modify(|tasks| tasks.push(task));
+            } else {
+                tasks_grouped_by_due_date.insert(naive_due_date, Vec::<Task>::from([task]));
+            }
+        }
+
+        // Print all tasks that belong to the active project.
+        let mut naive_due_date_idx = 0;
+        for (naive_due_date, tasks) in tasks_grouped_by_due_date.iter().rev() {
+            for task in tasks {
+                let uuid = format!("task {}", task.uuid().to_string());
+                println!("{}", Foreground::color(&uuid, task.status().color()));
+                println!("due:      {}", naive_due_date);
+                println!("status:   {}", task.status().as_display());
+                println!("priority: {}", task.priority().as_display());
+                println!("\n    {}", Foreground::color(&task.what(), Color::White));
+                if naive_due_date_idx != tasks_grouped_by_due_date.len() - 1 {
+                    println!("");
                 }
             }
+
+            naive_due_date_idx += 1;
         }
     }
 }
