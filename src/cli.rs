@@ -274,15 +274,30 @@ impl Cli {
         }
 
         // Print all tasks that belong to the active project.
+        let mut naive_due_date_idx = 0;
+        
         for (naive_due_date, tasks) in tasks_grouped_by_due_date.iter().rev() {
+            let mut task_idx = 0;
+
             for task in tasks {
                 let uuid = format!("task {}", task.uuid().to_string());
                 println!("{}", Foreground::color(&uuid, task.status().color()));
                 println!("priority: {}", task.priority().as_display());
                 println!("status:   {}", task.status().as_display());
                 println!("due:      {}", naive_due_date);
-                println!("\n    {}\n", Foreground::color(&task.what(), Color::White));
+                println!("\n    {}", Foreground::color(&task.what(), Color::White));
+
+                // Always print an extra newline after the task, except for the last entry.
+                if !(naive_due_date_idx == tasks_grouped_by_due_date.len() - 1
+                    && task_idx == tasks.len() - 1)
+                {
+                    println!("");
+                }
+
+                task_idx += 1;
             }
+
+            naive_due_date_idx += 1;
         }
     }
 
