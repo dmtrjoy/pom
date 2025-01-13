@@ -1,3 +1,5 @@
+use core::panic;
+
 use chrono::{DateTime, Local, TimeZone, Utc};
 use clap::ValueEnum;
 use rusqlite::{params, Connection};
@@ -21,7 +23,7 @@ impl Priority {
     pub fn as_display(&self) -> String {
         match self {
             Priority::Low => Foreground::color(&self.as_str().to_string(), Color::LightGreen),
-            Priority::Medium => Foreground::color(&self.as_str().to_string(), Color::Yellow),
+            Priority::Medium => Foreground::color(&self.as_str().to_string(), Color::Orange),
             Priority::High => Foreground::color(&self.as_str().to_string(), Color::Red),
             Priority::Critical => Foreground::color(&self.as_str().to_string(), Color::BrightRed),
         }
@@ -88,7 +90,7 @@ impl Status {
     pub fn color(&self) -> Color {
         match self {
             Status::NotStarted => Color::Blue,
-            Status::InProgress => Color::Orange,
+            Status::InProgress => Color::Yellow,
             Status::Completed => Color::Green,
             Status::Blocked => Color::Red,
             Status::Overdue => Color::BrightRed,
@@ -154,9 +156,9 @@ impl Task {
         &self.what
     }
 
-    /// Borrows the due date.
-    pub fn due_date(&self) -> &DateTime<Local> {
-        &self.due_date
+    /// Borrows a mutable reference to the task objective.
+    pub fn what_mut(&mut self) -> &mut String {
+        &mut self.what
     }
 
     /// Copies the status.
@@ -164,9 +166,29 @@ impl Task {
         self.status
     }
 
+    /// Borrows a mutable reference to the status.
+    pub fn status_mut(&mut self) -> &mut Status {
+        &mut self.status
+    }
+
     /// Copies the priority.
     pub fn priority(&self) -> Priority {
         self.priority
+    }
+
+    /// Borrows a mutable reference to the priority.
+    pub fn priority_mut(&mut self) -> &mut Priority {
+        &mut self.priority
+    }
+
+    /// Borrows the due date.
+    pub fn due_date(&self) -> &DateTime<Local> {
+        &self.due_date
+    }
+
+    /// Borrows a mutable reference to the due date.
+    pub fn due_date_mut(&mut self) -> &mut DateTime<Local> {
+        &mut self.due_date
     }
 
     /// Constructs a new task.
@@ -208,8 +230,8 @@ impl<'a> TaskDao<'a> {
 
     /// Adds a new task to the `task` table.
     pub fn add(&self, task: &Task) {
-        // All datetimes are stored in UTC and converted to the local timezone when interpreting
-        // commands.
+        // All datetimes are stored in UTC and converted to the local timezone
+        // when interpreting commands.
         let creation_date_utc: DateTime<Utc> = DateTime::from(task.creation_date);
         let due_date_utc: DateTime<Utc> = DateTime::from(task.due_date);
 
@@ -277,6 +299,84 @@ impl<'a> TaskDao<'a> {
         }
 
         tasks
+    }
+
+    /// Deletes a task from the `task` table.
+    pub fn delete(&self, task_uuid: &Uuid) {
+        self.conn
+            .execute(
+                "DELETE FROM task
+                WHERE uuid = ?1",
+                params![task_uuid],
+            )
+            .expect("failed to delete task");
+    }
+
+    /// Fetches a task from the `task` table.
+    pub fn get(&self, task_uuid: &Uuid) -> Task {
+        // Prepare statement to fetch all tasks.
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT
+                    uuid,
+                    what,
+                    priority,
+                    status,
+                    creation_epoch,
+                    due_date_epoch,
+                    project_uuid
+                FROM task
+                WHERE uuid = ?1",
+            )
+            .expect("failed to prepare fetch-all-tasks statement");
+
+        // Fetch and store all tasks.
+        let task_iter = stmt
+            .query_map([task_uuid], |row| {
+                Ok(Task::new_impl(
+                    row.get(0)?,
+                    row.get(1)?,
+                    Priority::from_i64(row.get(2)?),
+                    Status::from_i64(row.get(3)?),
+                    DateTime::from(Utc.timestamp_opt(row.get(4)?, 0).unwrap()),
+                    DateTime::from(Utc.timestamp_opt(row.get(5)?, 0).unwrap()),
+                    row.get(6)?,
+                ))
+            })
+            .expect("failed to fetch a task");
+
+        for task in task_iter {
+            return task.expect("failed to extract task from query map");
+        }
+
+        panic!("failed to fetch a task");
+    }
+
+    /// Updates a task in the `task` table.
+    pub fn update(&self, task: &Task) {
+        // All datetimes are stored in UTC and converted to the local timezone
+        // when interpreting commands.
+        let due_date_utc: DateTime<Utc> = DateTime::from(task.due_date);
+
+        self.conn
+            .execute(
+                "UPDATE task
+                SET
+                    what = ?1,
+                    priority = ?2,
+                    status = ?3,
+                    due_date_epoch = ?4
+                WHERE uuid = ?5",
+                params![
+                    task.what,
+                    task.priority as i64,
+                    task.status as i64,
+                    due_date_utc.timestamp(),
+                    task.uuid
+                ],
+            )
+            .expect("failed to update task");
     }
 
     /// Creates the `task` table if it does not exist. Panics if an error is encountered.
