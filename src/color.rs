@@ -10,6 +10,7 @@ pub enum Color {
     BrightRed,
     Yellow,
     White,
+    BrightWhite,
 }
 
 /// Color implementation.
@@ -26,6 +27,7 @@ impl Color {
             Color::BrightRed => "\x1b[1;38;5;203m",
             Color::Yellow => "\x1b[38;5;227m",
             Color::White => "\x1b[38;5;231m",
+            Color::BrightWhite => "\x1b[1;38;5;231m",
         }
     }
 }
