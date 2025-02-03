@@ -1,9 +1,7 @@
 mod cli;
-mod color;
 mod database;
-mod project;
-mod session;
-mod task;
+mod quest;
+mod table;
 
 use clap::Parser;
 use cli::{Args, Cli};
