@@ -1,24 +1,18 @@
-use std::collections::BTreeMap;
+use std::io::{stdin, stdout, Write};
 
-use chrono::{Local, NaiveDate, NaiveDateTime, TimeZone};
-use clap::{
-    builder::{styling::Ansi256Color, Styles},
-    Parser, Subcommand,
-};
-use uuid::Uuid;
+use clap::builder::styling::AnsiColor;
+use clap::builder::Styles;
+use clap::{Parser, Subcommand};
+use colored::Colorize;
 
-use crate::color::{Color, Foreground};
 use crate::database::Database;
-use crate::project::{Project, ProjectDao};
-use crate::session::{Entry, Key, Session};
-use crate::task::{Priority, Status, Task, TaskDao};
+use crate::quest::{Chain, Quest, QuestDao, Status, Tier};
+use crate::table::{Cell, Table};
 
-/// Default `pom` styles.
+/// Default styles.
 const STYLES: Styles = Styles::styled()
-    .header(Ansi256Color(47).on_default())
-    .usage(Ansi256Color(227).on_default())
-    .literal(Ansi256Color(231).on_default())
-    .placeholder(Ansi256Color(156).on_default());
+    .header(AnsiColor::Yellow.on_default())
+    .usage(AnsiColor::Yellow.on_default());
 
 /// Create and manage projects, set timers, and more!
 #[derive(Parser)]
@@ -35,340 +29,278 @@ impl Args {
     }
 }
 
-/// Represents every possible `pom` command.
+/// Represents every possible `quest` command.
 #[derive(Clone, Subcommand)]
 enum Command {
-    /// Add a task
+    /// Abandon a quest
     #[command(long_about)]
-    Do {
-        /// Objective
-        what: String,
-
-        /// Priority
-        #[arg(default_value_t = Priority::Low, long, short, value_enum)]
-        priority: Priority,
-
-        /// Status
-        #[arg(default_value_t = Status::NotStarted, long, short, value_enum)]
-        status: Status,
-
-        /// Due date
-        #[arg(long, short)]
-        due_date: String,
+    Abandon {
+        /// Quest ID
+        quest_id: i64,
     },
 
-    /// Create a new project
+    /// Accept a quest
     #[command(long_about)]
-    New { name: String },
+    Accept {
+        /// Quest ID
+        quest_id: i64,
+    },
 
-    /// Show or modify projects
+    /// Add a quest
     #[command(long_about)]
-    Project,
+    Add {
+        /// Objective
+        objective: String,
 
-    /// Switch projects
-    #[command(long_about)]
-    Switch { name: String },
+        /// Status
+        #[arg(default_value_t = Status::Pending, long, short, value_enum)]
+        status: Status,
 
-    /// List, modify, or delete tasks
+        /// Tier
+        #[arg(default_value_t = Tier::Common, long, short, value_enum)]
+        tier: Tier,
+
+        /// Create a quest chain
+        #[arg(long = "sub", value_name = "QUEST_ID")]
+        chain_id: Option<i64>,
+    },
+
+    /// Complete a quest
     #[command(long_about)]
-    Task(TaskArgs),
+    Complete {
+        /// Quest ID
+        quest_id: i64,
+    },
+
+    /// Delete a quest
+    #[command(long_about)]
+    Delete {
+        /// Quest ID
+        quest_id: i64,
+    },
+
+    /// Show all quests  
+    #[command(long_about)]
+    Log,
 }
 
-/// Represents all possible task arguments.
-#[derive(clap::Args, Clone)]
-struct TaskArgs {
-    #[command(flatten, next_help_heading = "Deletion Options")]
-    delete: DeleteTaskArgs,
+/// The CLI interpretter.
+pub struct Cli;
 
-    #[command(flatten, next_help_heading = "Modification Options")]
-    modify: ModifyTaskArgs,
-}
-
-#[derive(clap::Args, Clone)]
-#[group(multiple = true)]
-struct DeleteTaskArgs {
-    /// Delete a task
-    #[arg(long, short = 'd', value_name = "TASK_UUID")]
-    delete: Option<Uuid>,
-}
-
-#[derive(clap::Args, Clone)]
-#[group(multiple = true)]
-struct ModifyTaskArgs {
-    /// Modify a task
-    #[arg(long, short = 'm', value_name = "TASK_UUID")]
-    modify: Option<Uuid>,
-
-    /// Objective
-    #[arg(long, required = false, short = 'w', value_name = "WHAT")]
-    what: Option<String>,
-
-    /// Priority
-    #[arg(long, required = false, short = 'p', value_name = "PRIORITY")]
-    priority: Option<Priority>,
-
-    /// Status
-    #[arg(long, required = false, short = 's', value_name = "STATUS")]
-    status: Option<Status>,
-
-    /// Due date
-    #[arg(long, required = false, short = 'd', value_name = "DUE_DATE")]
-    due_date: Option<String>,
-}
-
-/// Represents the command line interface, which can interpret parsed arguments.
-pub struct Cli {}
-
-/// Command line interface implementation.
 impl Cli {
     /// Interprets the parse arguments from the command line.
     pub fn interpret(args: Args) {
         match args.command() {
-            Command::Do {
-                what,
-                priority,
+            Command::Abandon { quest_id } => {
+                Self::abandon_quest(quest_id);
+            }
+            Command::Accept { quest_id } => {
+                Self::accept_quest(quest_id);
+            }
+            Command::Add {
+                objective,
                 status,
-                due_date,
+                tier,
+                chain_id,
             } => {
-                Self::add_task(what, priority, status, due_date);
+                Self::add_quest(objective, status, tier, chain_id);
             }
-            Command::New { name } => {
-                Self::add_project(name);
+            Command::Complete { quest_id } => {
+                Self::complete_quest(quest_id);
             }
-            Command::Project => {
-                Self::display_projects();
+            Command::Delete { quest_id } => {
+                Self::delete_quest(quest_id);
             }
-            Command::Switch { name } => {
-                Self::switch_projects(name);
-            }
-            Command::Task(args) => {
-                if let Some(task_uuid) = args.delete.delete {
-                    Self::delete_task(task_uuid);
-                } else if let Some(task_uuid) = args.modify.modify {
-                    Self::modify_task(task_uuid, args.modify);
-                } else {
-                    Self::display_tasks();
-                }
+            Command::Log => {
+                Self::show_quests();
             }
         }
     }
 
-    /// Creates a new project.
-    fn add_project(name: String) {
-        // Open the database connection.
-        let database = Database::new();
-        let conn = database.conn();
+    /// Warns the user and asks for confirmation before proceeding.
+    fn confirmation_warning(message: &str) -> bool {
+        // Warn the user.
+        println!("Warning: {}", message);
+        print!("Proceed (y/N)? ");
 
-        // Load persistent session data.
-        let session = Session::new(&conn);
+        // Get the user input.
+        let mut input = String::new();
+        let _ = stdout().flush();
+        stdin().read_line(&mut input).expect("invalid string");
+        input = input.trim().to_lowercase();
 
-        // Create and add a new project to the database.
-        let project = Project::new(name);
-        let project_dao = ProjectDao::new(&conn);
-        project_dao.add(&project);
-
-        // Update the active project.
-        let entry: Entry = Entry::new(Key::ActiveProject, project.take_uuid());
-        session.set(entry);
+        // Only proceed on "y" or "yes".
+        input == "y" || input == "yes"
     }
 
-    /// Adds a task to the active project.
-    fn add_task(what: String, priority: Priority, status: Status, due_date: String) {
-        // Open the database connection.
+    /// Abandons the specified quest.
+    fn abandon_quest(quest_id: i64) {
+        // Get the quest from the database.
         let database = Database::new();
         let conn = database.conn();
+        let quest_dao = QuestDao::new(&conn);
+        let mut quest = quest_dao.get(quest_id);
 
-        // Load persistent session data.
-        let session = Session::new(&conn);
+        // Check if the quest is already abandoned.
+        if quest.status() == Status::Abandoned {
+            println!("Quest {} is already abandoned.", quest_id);
+            return;
+        }
 
-        // Parse the due date as a local datetime.
-        let due_datetime = due_date + "00:00:00"; // Due at midnight.
-        let naive_due_date_epoch =
-            NaiveDateTime::parse_from_str(&due_datetime, "%m-%d-%Y %H:%M:%S")
-                .expect("failed to parse due date");
+        // Ask for confirmation before abandoning a main quest with at least one secondary quest.
+        // if quest.is_main() && quest_dao.num_quests(quest.id()) > 0 {
+        //     let message = "Abandoning a main quest will abandon the entire quest chain.";
+        //     if !Self::confirmation_warning(message) {
+        //         println!("Quest {} not abandoned.", quest_id);
+        //         return;
+        //     }
+        // }
 
-        let creation_epoch = Local::now();
-        let due_date_epoch = Local.from_local_datetime(&naive_due_date_epoch).unwrap();
-
-        // Get the active project, which the newly created task belongs to.
-        let project_uuid = session.get(Key::ActiveProject);
-
-        // Construct and save the task.
-        let task = Task::new(
-            what,
-            priority,
-            status,
-            creation_epoch,
-            due_date_epoch,
-            project_uuid,
-        );
-        let task_dao = TaskDao::new(&conn);
-        task_dao.add(&task);
+        *quest.status_mut() = Status::Abandoned;
+        quest_dao.update(&quest);
+        println!("Abandoned quest {}!", quest_id);
     }
 
-    /// Deletes a task from the active project.
-    fn delete_task(task_uuid: Uuid) {
+    /// Accepts the specified quest.
+    fn accept_quest(quest_id: i64) {
         // Open the database connection.
         let database = Database::new();
         let conn = database.conn();
 
-        // Delete the task.
-        let task_dao = TaskDao::new(&conn);
-        task_dao.delete(&task_uuid);
-        println!("Deleted task {}", task_uuid)
+        // Update the quest status to ongoing.
+        let quest_dao = QuestDao::new(&conn);
+        let mut quest = quest_dao.get(quest_id);
+
+        if quest.status() == Status::Ongoing {
+            println!("Quest is already accepted");
+            return;
+        }
+
+        *quest.status_mut() = Status::Ongoing;
+        quest_dao.update(&quest);
+        println!("Quest {} accepted!", quest_id);
     }
 
-    /// Displays all projects, highlighting the active project.
-    fn display_projects() {
+    /// Adds a quest to the log.
+    fn add_quest(objective: String, status: Status, tier: Tier, chain_id: Option<i64>) {
         // Open the database connection.
         let database = Database::new();
         let conn = database.conn();
 
-        // Load persistent session data.
-        let session = Session::new(&conn);
+        // Construct and save the quest.
+        let quest = Quest::new(objective.trim().to_owned(), status, tier, chain_id);
+        let quest_dao = QuestDao::new(&conn);
+        quest_dao.add(&quest);
+    }
 
-        // Get the active project.
-        let project_uuid = session.get(Key::ActiveProject);
+    /// Completes a quest.
+    fn complete_quest(quest_id: i64) {
+        // Open the database connection.
+        let database = Database::new();
+        let conn = database.conn();
 
-        let project_dao = ProjectDao::new(&conn);
-        let projects = project_dao.all();
+        // Update the quest status to completed.
+        let quest_dao = QuestDao::new(&conn);
+        let mut quest = quest_dao.get(quest_id);
 
-        // Print all projects, distinguishing the active project.
-        for project in projects {
-            if project.uuid().eq(&project_uuid) {
-                println!(
-                    "-> {}",
-                    Foreground::color(project.name(), Color::BrightWhite)
-                );
+        if quest.status() == Status::Completed {
+            println!("Quest is already completed");
+            return;
+        }
+
+        *quest.status_mut() = Status::Completed;
+        quest_dao.update(&quest);
+        println!("Quest {} completed!", quest_id);
+    }
+
+    /// Deletes a quest from the log.
+    fn delete_quest(quest_id: i64) {
+        // Open the database connection.
+        let database = Database::new();
+        let conn = database.conn();
+
+        // Delete the quest.
+        let quest_dao = QuestDao::new(&conn);
+        quest_dao.delete(quest_id);
+    }
+
+    /// Shows all quests in the log.
+    fn show_quests() {
+        // Open the database connection.
+        let database = Database::new();
+        let conn = database.conn();
+
+        // Get all quests from the log.
+        let quest_dao = QuestDao::new(&conn);
+        let chains = quest_dao.chains();
+
+        let cols: Vec<Cell> = vec![
+            Cell::rich("ID".to_owned().underline()),
+            Cell::rich("Objective".to_owned().underline()),
+            Cell::rich("Status".to_owned().underline()),
+            Cell::rich("Tier".to_owned().underline()),
+        ];
+        let mut table = Table::new(cols);
+
+        for chain in chains {
+            let row = vec![
+                Cell::plain(chain.id().to_string()),
+                Cell::plain("".to_owned() + chain.objective()),
+                Cell::plain(chain.status().to_string()),
+                Cell::rich(chain.tier().to_colored_string()),
+            ];
+            table.add(row);
+
+            let mut chain_idx = 0;
+            for sub in chain.chains() {
+                Self::rec(sub, 0, chain_idx == chain.chains().len() - 1, &mut table, &mut vec![]);
+                chain_idx += 1;
+            }
+        }
+
+        table.show();
+    }
+
+    fn rec(chain: &Chain, depth: usize , is_last: bool, table: &mut Table, line_active: &mut Vec<bool>) {
+        let mut prefix = String::new();
+
+        for &active in &line_active[..depth] {
+            if active {
+                prefix.push_str("│   ");
             } else {
-                println!("   {}", project.name());
-            }
-        }
-    }
-
-    /// Displays all tasks that belong to the active project.
-    fn display_tasks() {
-        // Open the database connection.
-        let database = Database::new();
-        let conn = database.conn();
-
-        // Load persistent session data.
-        let session = Session::new(&conn);
-
-        // Get the active project and its tasks.
-        let project_uuid = session.get(Key::ActiveProject);
-        let task_dao = TaskDao::new(&conn);
-        let tasks = task_dao.all(project_uuid);
-
-        // Group tasks by naive due date (no notion of time zone).
-        let mut tasks_grouped_by_due_date = BTreeMap::<NaiveDate, Vec<Task>>::new();
-        for task in tasks {
-            let naive_due_date = task.due_date().date_naive();
-            if tasks_grouped_by_due_date.contains_key(&naive_due_date) {
-                tasks_grouped_by_due_date
-                    .entry(naive_due_date)
-                    .and_modify(|tasks| tasks.push(task));
-            } else {
-                tasks_grouped_by_due_date.insert(naive_due_date, Vec::<Task>::from([task]));
+                prefix.push_str("    ");
             }
         }
 
-        // Print all tasks that belong to the active project.
-        let mut naive_due_date_idx = 0;
-        
-        for (naive_due_date, tasks) in tasks_grouped_by_due_date.iter().rev() {
-            let mut task_idx = 0;
-
-            for task in tasks {
-                let uuid = format!("task {}", task.uuid().to_string());
-                println!("{}", Foreground::color(&uuid, task.status().color()));
-                println!("priority: {}", task.priority().as_display());
-                println!("status:   {}", task.status().as_display());
-                println!("due:      {}", naive_due_date);
-                println!("\n    {}", Foreground::color(&task.what(), Color::White));
-
-                // Always print an extra newline after the task, except for the last entry.
-                if !(naive_due_date_idx == tasks_grouped_by_due_date.len() - 1
-                    && task_idx == tasks.len() - 1)
-                {
-                    println!("");
-                }
-
-                task_idx += 1;
-            }
-
-            naive_due_date_idx += 1;
-        }
-    }
-
-    /// Modifies a task in the active project. The task details to modify are
-    /// specified in the `ModifyTaskArgs`.
-    fn modify_task(task_uuid: Uuid, args: ModifyTaskArgs) {
-        // Open the database connection.
-        let database = Database::new();
-        let conn = database.conn();
-
-        // Get the specified task.
-        let task_dao = TaskDao::new(&conn);
-        let mut task = task_dao.get(&task_uuid);
-
-        // Tracks if the task was updated.
-        let mut is_task_updated = false;
-
-        // Update the task objective.
-        if let Some(what) = args.what {
-            *task.what_mut() = what;
-            is_task_updated = true;
-        }
-
-        // Update the priority.
-        if let Some(priority) = args.priority {
-            *task.priority_mut() = priority;
-            is_task_updated = true;
-        }
-
-        // Update the status.
-        if let Some(status) = args.status {
-            *task.status_mut() = status;
-            is_task_updated = true;
-        }
-
-        // Update the due date.
-        if let Some(due_date) = args.due_date {
-            // Parse the due date as a local datetime.
-            let due_datetime = due_date + "00:00:00"; // Due at midnight.
-            let naive_due_date_epoch =
-                NaiveDateTime::parse_from_str(&due_datetime, "%m-%d-%Y %H:%M:%S")
-                    .expect("failed to parse due date");
-            let due_date_epoch = Local.from_local_datetime(&naive_due_date_epoch).unwrap();
-            *task.due_date_mut() = due_date_epoch;
-            is_task_updated = true;
-        }
-
-        if is_task_updated {
-            // Update the task.
-            task_dao.update(&task);
-            println!("Modified task {}", task_uuid);
+        if is_last {
+            prefix.push_str("└── ");
         } else {
-            println!("No task modifications were specified");
+            prefix.push_str("├── ");
         }
-    }
 
-    /// Switches the active project.
-    fn switch_projects(name: String) {
-        // Open the database connection.
-        let database = Database::new();
-        let conn = database.conn();
+        let row = vec![
+            Cell::rich(chain.id().to_string().black()),
+            Cell::plain(prefix + chain.objective()),
+            Cell::plain(chain.status().to_string()),
+            Cell::rich(chain.tier().to_colored_string()),
+        ];
+        table.add(row);
 
-        // Load persistent session data.
-        let session = Session::new(&conn);
+        if depth < line_active.len() {
+            line_active[depth] = !is_last; // Keep │ if it's not the last item
+        } else {
+            line_active.push(!is_last);
+        }
 
-        // Get the specified project.
-        let project_dao = ProjectDao::new(&conn);
-        let project = project_dao.get(name);
+        let chains = chain.chains();
+        let last_index = chains.len().saturating_sub(1);
 
-        // Update the active project.
-        let entry: Entry = Entry::new(Key::ActiveProject, project.take_uuid());
-        session.set(entry);
+        for (chain_idx, chain) in chains.iter().enumerate() {
+            Self::rec(chain, depth + 1, chain_idx == last_index, table, line_active);
+        }
+
+        if depth < line_active.len() {
+            line_active[depth] = false;
+        }
     }
 }

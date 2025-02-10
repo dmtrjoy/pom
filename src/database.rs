@@ -13,12 +13,12 @@ pub struct Database {
 
 /// Local database reference implementation.
 impl Database {
-    const DATABASE_NAME: &str = "pomdb.sqlite";
+    const DATABASE_NAME: &str = "questdb.sqlite";
 
     /// Constructs a new database reference.
     pub fn new() -> Self {
         // Read the local data path.
-        let project_dirs = ProjectDirs::from("com", "Ode", "pom").unwrap();
+        let project_dirs = ProjectDirs::from("com", "Ode", "quest").unwrap();
         let data_dir = project_dirs.data_dir();
 
         // Create the data directory if it does not exist.
