@@ -88,7 +88,7 @@ enum Command {
 pub struct Cli;
 
 impl Cli {
-    /// Interprets the parse arguments from the command line.
+    /// Interprets the parsed arguments from the command line.
     pub fn interpret(args: Args) {
         match args.command() {
             Command::Abandon { quest_id } => {
