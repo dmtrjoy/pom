@@ -88,7 +88,7 @@ enum Command {
 pub struct Cli;
 
 impl Cli {
-    /// Interprets the parse arguments from the command line.
+    /// Interprets the parsed arguments from the command line.
     pub fn interpret(args: Args) {
         match args.command() {
             Command::Abandon { quest_id } => {
@@ -224,83 +224,106 @@ impl Cli {
         quest_dao.delete(quest_id);
     }
 
-    /// Shows all quests in the log.
-    fn show_quests() {
-        // Open the database connection.
-        let database = Database::new();
-        let conn = database.conn();
-
-        // Get all quests from the log.
-        let quest_dao = QuestDao::new(&conn);
-        let chains = quest_dao.chains();
-
-        let cols: Vec<Cell> = vec![
-            Cell::rich("ID".to_owned().underline()),
-            Cell::rich("Objective".to_owned().underline()),
-            Cell::rich("Status".to_owned().underline()),
-            Cell::rich("Tier".to_owned().underline()),
-        ];
-        let mut table = Table::new(cols);
-
-        for chain in chains {
-            let row = vec![
-                Cell::plain(chain.id().to_string()),
-                Cell::plain("".to_owned() + chain.objective()),
-                Cell::plain(chain.status().to_string()),
-                Cell::rich(chain.tier().to_colored_string()),
-            ];
-            table.add(row);
-
-            let mut chain_idx = 0;
-            for sub in chain.chains() {
-                Self::rec(sub, 0, chain_idx == chain.chains().len() - 1, &mut table, &mut vec![]);
-                chain_idx += 1;
-            }
-        }
-
-        table.show();
-    }
-
-    fn rec(chain: &Chain, depth: usize , is_last: bool, table: &mut Table, line_active: &mut Vec<bool>) {
+    /// Populates the table with quest chains, where each secondary quest chain
+    /// is nested underneath its parent.
+    fn populate_table(
+        chain: &Chain,
+        depth: usize,
+        is_terminal: bool,
+        is_depth_nested: &mut Vec<bool>,
+        table: &mut Table,
+    ) {
+        // Prepended to the quest objective. Necessary to show the chain connections and depth.
         let mut prefix = String::new();
 
-        for &active in &line_active[..depth] {
-            if active {
+        // Check if quest chains are nested 
+        for &is_nested in &is_depth_nested[..depth] {
+            if is_nested {
                 prefix.push_str("│   ");
             } else {
                 prefix.push_str("    ");
             }
         }
 
-        if is_last {
+        if is_terminal {
+            // Close the nested list of chains.
             prefix.push_str("└── ");
         } else {
             prefix.push_str("├── ");
         }
 
         let row = vec![
-            Cell::rich(chain.id().to_string().black()),
-            Cell::plain(prefix + chain.objective()),
-            Cell::plain(chain.status().to_string()),
-            Cell::rich(chain.tier().to_colored_string()),
+            Cell::from(chain.id()),
+            Cell::from(prefix + chain.objective()),
+            Cell::from(chain.status()),
+            Cell::from(chain.tier()),
         ];
         table.add(row);
 
-        if depth < line_active.len() {
-            line_active[depth] = !is_last; // Keep │ if it's not the last item
+        if depth < is_depth_nested.len() {
+            is_depth_nested[depth] = !is_terminal; // Keep │ if it's not the last item
         } else {
-            line_active.push(!is_last);
+            is_depth_nested.push(!is_terminal);
         }
 
         let chains = chain.chains();
         let last_index = chains.len().saturating_sub(1);
 
         for (chain_idx, chain) in chains.iter().enumerate() {
-            Self::rec(chain, depth + 1, chain_idx == last_index, table, line_active);
+            Self::populate_table(
+                chain,
+                depth + 1,
+                chain_idx == last_index,
+                is_depth_nested,
+                table,
+            );
         }
 
-        if depth < line_active.len() {
-            line_active[depth] = false;
+        if depth < is_depth_nested.len() {
+            is_depth_nested[depth] = false;
         }
     }
+
+    /// Shows all quests in the log.
+    fn show_quests() {
+        // Open the database connection.
+        let database = Database::new();
+        let conn = database.conn();
+
+        // Get all quest chains from the log.
+        let quest_dao = QuestDao::new(&conn);
+        let chains = quest_dao.chains();
+
+        // Populate and show the table.
+        let columns: Vec<Cell> = vec![
+            Cell::from("ID".underline()),
+            Cell::from("Objective".underline()),
+            Cell::from("Status".underline()),
+            Cell::from("Tier".underline()),
+        ];
+        let mut table = Table::new(columns);
+
+        for chain in chains {
+            let row = vec![
+                Cell::from(chain.id()),
+                Cell::from(chain.objective()),
+                Cell::from(chain.status()),
+                Cell::from(chain.tier()),
+            ];
+            table.add(row);
+
+            for (chain_idx, child_chain) in chain.chains().iter().enumerate() {
+                Self::populate_table(
+                    child_chain,
+                    0, // Chain depth.
+                    chain_idx == chain.chains().len() - 1, // Is terminal chain.
+                    &mut vec![],
+                    &mut table,
+                );
+            }
+        }
+
+        table.show();
+    }
+
 }
