@@ -1,11 +1,13 @@
+use std::collections::HashMap;
+use std::convert::From;
+use std::fmt::{Display, Formatter, Result};
+
 use clap::ValueEnum;
 use colored::{ColoredString, Colorize};
 use rusqlite::{params, Connection};
-use std::collections::HashMap;
-use std::convert::From;
-use std::fmt;
 
-/// A collection of quests, containing one main quest and a list of quest chains.
+/// A collection of quests, containing one main quest and a list of secondary
+/// quest chains.
 #[derive(Clone, Debug)]
 pub struct Chain {
     chains: Vec<Chain>,
@@ -21,11 +23,12 @@ impl Chain {
         }
     }
 
+    /// Adds a secondary quest, which is stored as a quest chain.
     pub fn add(&mut self, quest: Quest) {
         self.chains.push(Chain::new(quest));
     }
 
-    // Copies the identifier.
+    /// Copies the identifier.
     pub fn id(&self) -> i64 {
         self.main.id()
     }
@@ -63,7 +66,7 @@ impl Chain {
 }
 
 /// A quest to be completed, including a tier, status, due date, and more.
-#[derive(Clone,Debug)]
+#[derive(Clone, Debug)]
 pub struct Quest {
     id: i64,
     chain_id: Option<i64>,
@@ -164,65 +167,41 @@ impl<'a> QuestDao<'a> {
 
     /// Gets all quest chains from the database.
     pub fn chains(&self) -> Vec<Chain> {
-        // Prepare the query.
-        let query = "
-SELECT id, chain_id, objective, status, tier
-FROM quest
-ORDER BY id";
-        let mut stmt = self
-            .conn
-            .prepare(query)
-            .expect("failed to prepare get-all-chains statement");
+        // Get all quests from the database.
+        let quests = self.quests();
 
-        // Execute the query.
-        let rows = stmt.query_map([], |row| {
-            Ok(Quest::new_impl(
-                row.get(0)?,
-                row.get(1)?,
-                row.get(2)?,
-                Status::from(row.get::<_, i64>(3)?),
-                Tier::from(row.get::<_, i64>(4)?),
-            ))
-        });
-        let quest_iter = rows.expect("failed to get all quests");
+        // Construct a hashmap of chains, where each key is a chain identifer
+        // corresponding to the chain itself and its immediate children. Root
+        // chains will, therefore, be disjoint from chains beyond their
+        // immediate children.
+        let mut disjoint_chains = HashMap::new();
+        let mut root_chains = Vec::new();
 
-        let mut chains = Vec::new();
-        let mut prev_chains = HashMap::new();
-        let mut roots = Vec::new();
-
-        for quest in quest_iter {
-            let quest = quest.unwrap();
-            let chain_id: Option<i64> = quest.chain_id;
+        for quest in quests {
             let chain = Chain::new(quest);
-            prev_chains.insert(chain.main.id, chain.clone());
+            disjoint_chains.insert(chain.main.id, chain.clone());
 
-            if let Some(chain_id) = chain_id {
-                let chainx = prev_chains.get_mut(&chain_id).unwrap();
-                chainx.chains.push(chain);
+            if let Some(chain_id) = chain.main.chain_id {
+                // Chain has a parent, which must already exist in the hash map
+                // since the quests are sorted by identifier.
+                let parent_chain = disjoint_chains.get_mut(&chain_id).unwrap();
+                parent_chain.chains.push(chain);
             } else {
-                roots.push(chain.main.id);
+                // Chain does not have a parent and, thus, must be a root chain.
+                root_chains.push(chain.main.id);
             }
         }
 
-        for root in roots {
-            let chain = &mut prev_chains.remove(&root).unwrap();
-            Self::rec(chain, &mut prev_chains);
-            let x = chain.clone();
-            chains.push(x);
+        let mut chains = Vec::new();
+
+        for root_chain in root_chains {
+            let root_chain = &mut disjoint_chains.remove(&root_chain).unwrap();
+            Self::connect(root_chain, &mut disjoint_chains);
+            let chain = root_chain.clone();
+            chains.push(chain);
         }
 
         chains
-    }
-
-    fn rec(chain: &mut Chain, chain_map: &mut HashMap<i64, Chain>) {
-        if chain.chains.is_empty() {
-            return;
-        }
-        
-        for c in &mut chain.chains {
-            c.chains = chain_map.remove(&c.main.id).unwrap().chains;
-            Self::rec(c, chain_map);
-        }
     }
 
     /// Deletes the specified quest from the database.
@@ -269,15 +248,14 @@ ORDER BY id";
 
         // Execute the query.
         let params = [chain_id];
-        stmt.query_row(params, |row| {
-            Ok(row.get(0)?)
-        }).expect("failed to get all quests")
+        stmt.query_row(params, |row| Ok(row.get(0)?))
+            .expect("failed to get all quests")
     }
 
     /// Gets all quests from the database.
     pub fn quests(&self) -> Vec<Quest> {
         // Prepare the query.
-        let query = "SELECT id, chain_id, objective, status, tier FROM quest";
+        let query = "SELECT id, chain_id, objective, status, tier FROM quest ORDER BY id";
         let mut stmt = self
             .conn
             .prepare(query)
@@ -343,6 +321,19 @@ ORDER BY id";
         }
     }
 
+    /// Connects a set of disjoint chains into one complete chain, where the
+    /// root chain is the first chain passed into the function.
+    fn connect(chain: &mut Chain, disjoint_chains: &mut HashMap<i64, Chain>) {
+        if chain.chains.is_empty() {
+            return;
+        }
+
+        for child_chain in &mut chain.chains {
+            child_chain.chains = disjoint_chains.remove(&child_chain.main.id).unwrap().chains;
+            Self::connect(child_chain, disjoint_chains);
+        }
+    }
+
     /// Checks if the `quest` table exists.
     fn exists(conn: &Connection) -> bool {
         conn.prepare(
@@ -367,9 +358,8 @@ pub enum Status {
     Abandoned = 4,
 }
 
-// Display trait implementation for the `Status` enum.
-impl fmt::Display for Status {
-    fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+impl Display for Status {
+    fn fmt(&self, formatter: &mut Formatter) -> Result {
         match self {
             Self::Pending => write!(formatter, "Pending"),
             Self::Ongoing => write!(formatter, "Ongoing"),
@@ -405,7 +395,7 @@ pub enum Tier {
 impl Tier {
     pub fn to_colored_string(&self) -> ColoredString {
         match self {
-            Self::Common => self.to_string().black(),
+            Self::Common => self.to_string().into(),
             Self::Rare => self.to_string().blue(),
             Self::Epic => self.to_string().purple(),
             Self::Legendary => self.to_string().yellow(),
@@ -413,9 +403,8 @@ impl Tier {
     }
 }
 
-// Display trait implementation for the `Tier` enum.
-impl fmt::Display for Tier {
-    fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+impl Display for Tier {
+    fn fmt(&self, formatter: &mut Formatter) -> Result {
         match self {
             Self::Common => write!(formatter, "✦ Common"),
             Self::Rare => write!(formatter, "✦ Rare"),

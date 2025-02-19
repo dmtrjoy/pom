@@ -1,4 +1,8 @@
+use std::convert::From;
+
 use colored::ColoredString;
+
+use crate::quest::{Status, Tier};
 
 /// A table cell. Supports plain or rich text.
 pub struct Cell {
@@ -6,22 +10,66 @@ pub struct Cell {
 }
 
 impl Cell {
-    pub fn plain(content: String) -> Self {
-        Self {
-            content: content.into(),
-        }
-    }
-
-    pub fn rich(content: ColoredString) -> Self {
-        Self { content }
-    }
-
     pub fn content(&self) -> &ColoredString {
         &self.content
     }
 
     pub fn width(&self) -> usize {
         self.content.chars().count()
+    }
+}
+
+impl From<ColoredString> for Cell {
+    fn from(value: ColoredString) -> Self {
+        Self { content: value }
+    }
+}
+
+impl From<i64> for Cell {
+    fn from(value: i64) -> Self {
+        Self {
+            content: value.to_string().into(),
+        }
+    }
+}
+
+impl From<Status> for Cell {
+    fn from(value: Status) -> Self {
+        Self {
+            content: value.to_string().into(),
+        }
+    }
+}
+
+impl From<&String> for Cell {
+    fn from(value: &String) -> Self {
+        Self {
+            content: value.clone().into(),
+        }
+    }
+}
+
+impl From<String> for Cell {
+    fn from(value: String) -> Self {
+        Self {
+            content: value.into(),
+        }
+    }
+}
+
+impl From<&str> for Cell {
+    fn from(value: &str) -> Self {
+        Self {
+            content: value.to_owned().into(),
+        }
+    }
+}
+
+impl From<Tier> for Cell {
+    fn from(value: Tier) -> Self {
+        Self {
+            content: value.to_colored_string(),
+        }
     }
 }
 
