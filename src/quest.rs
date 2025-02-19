@@ -23,22 +23,14 @@ impl Chain {
         }
     }
 
-    /// Adds a secondary quest, which is stored as a quest chain.
-    pub fn add(&mut self, quest: Quest) {
-        self.chains.push(Chain::new(quest));
+    // Borrows the secondary quest chains.
+    pub fn chains(&self) -> &Vec<Chain> {
+        &self.chains
     }
 
     /// Copies the identifier.
     pub fn id(&self) -> i64 {
         self.main.id()
-    }
-
-    fn chain_id(&self) -> Option<i64> {
-        self.main.chain_id()
-    }
-
-    pub fn link(&mut self, chain: Chain) {
-        self.chains.push(chain);
     }
 
     /// Borrows the objective.
@@ -54,14 +46,6 @@ impl Chain {
     /// Copies the tier.
     pub fn tier(&self) -> Tier {
         self.main.tier()
-    }
-
-    pub fn chains(&self) -> &Vec<Chain> {
-        &self.chains
-    }
-
-    fn chains_mut(&mut self) -> &mut Vec<Chain> {
-        &mut self.chains
     }
 }
 
@@ -91,10 +75,6 @@ impl Quest {
         self.id
     }
 
-    pub fn chain_id(&self) -> Option<i64> {
-        self.chain_id
-    }
-
     /// Borrows the objective.
     pub fn objective(&self) -> &String {
         &self.objective
@@ -103,11 +83,6 @@ impl Quest {
     /// Copies the status.
     pub fn status(&self) -> Status {
         self.status
-    }
-
-    /// Borrows a mutable reference to the status.
-    pub fn status_mut(&mut self) -> &mut Status {
-        &mut self.status
     }
 
     /// Copies the tier.
@@ -204,19 +179,23 @@ impl<'a> QuestDao<'a> {
         chains
     }
 
-    /// Deletes the specified quest from the database.
-    pub fn delete(&self, quest_id: i64) {
+    /// Deletes the specified quest chain from the database.
+    pub fn delete_chain(&self, chain_id: i64) {
         self.conn
             .execute(
-                "DELETE FROM quest
-                WHERE id = ?1",
-                params![quest_id],
+                "WITH RECURSIVE chain AS (
+                    SELECT id FROM quest WHERE id = ?1 OR chain_id = ?1
+                    UNION ALL
+                    SELECT quest.id FROM quest
+                    INNER JOIN chain ON quest.chain_id = chain.id
+                ) DELETE FROM quest WHERE id IN (SELECT id FROM chain)",
+                params![chain_id],
             )
-            .expect("failed to delete quest");
+            .expect("failed to delete quest chain");
     }
 
     /// Gets the specified quest from the database.
-    pub fn get(&self, quest_id: i64) -> Quest {
+    pub fn get_quest(&self, quest_id: i64) -> Quest {
         // Prepare the query.
         let query = "SELECT id, chain_id, objective, status, tier FROM quest WHERE id = ?1";
         let mut stmt = self
@@ -236,20 +215,6 @@ impl<'a> QuestDao<'a> {
             ))
         })
         .expect("failed to get quest")
-    }
-
-    pub fn num_quests(&self, chain_id: i64) -> i64 {
-        // Prepare the query.
-        let query = "SELECT COUNT(*) FROM quest WHERE chain_id = ?1";
-        let mut stmt = self
-            .conn
-            .prepare(query)
-            .expect("failed to prepare get-all-quests statement");
-
-        // Execute the query.
-        let params = [chain_id];
-        stmt.query_row(params, |row| Ok(row.get(0)?))
-            .expect("failed to get all quests")
     }
 
     /// Gets all quests from the database.
@@ -282,24 +247,32 @@ impl<'a> QuestDao<'a> {
         quests
     }
 
-    /// Updates the specified quest in the database.
-    pub fn update(&self, quest: &Quest) {
-        let query = "UPDATE quest
-        SET chain_id  = ?1,
-            objective = ?2,
-            status    = ?3,
-            tier      = ?4
-        WHERE id = ?5";
-        let params = params![
-            quest.chain_id,
-            quest.objective,
-            quest.status as i64,
-            quest.tier as i64,
-            quest.id
-        ];
+    pub fn is_main_quest(&self, quest_id: i64) -> bool {
+        let query = "SELECT COUNT() FROM quest WHERE chain_id = ?1";
+        let mut stmt = self
+            .conn
+            .prepare(query)
+            .expect("failed to prepare get-quest statement");
+
+        let params = [quest_id];
+        stmt.query_row(params, |row: &rusqlite::Row<'_>| Ok(row.get::<_, i64>(0)?))
+            .expect("failed to get quest")
+            > 0
+    }
+
+    /// Updates the status of every quest in specified quest chain.
+    pub fn update_chain_status(&self, chain_id: i64, status: Status) {
         self.conn
-            .execute(query, params)
-            .expect("failed to update quest");
+            .execute(
+                "WITH RECURSIVE chain AS (
+                    SELECT id FROM quest WHERE id = ?1 OR chain_id = ?1
+                    UNION ALL
+                    SELECT quest.id FROM quest
+                    INNER JOIN chain ON quest.chain_id = chain.id
+                ) UPDATE quest SET status = ?2 WHERE id IN (SELECT id FROM chain)",
+                params![chain_id, status as i64],
+            )
+            .expect("failed to delete quest chain");
     }
 
     /// Creates the `quest` table if it does not exist.

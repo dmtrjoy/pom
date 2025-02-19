@@ -88,6 +88,15 @@ enum Command {
 pub struct Cli;
 
 impl Cli {
+    const WARNING_ABANDON_QUEST_CHAIN: &str =
+        "Abandoning a main quest will abandon the entire quest chain.";
+    const WARNING_ACCEPT_QUEST_CHAIN: &str =
+        "Accepting a main quest will accept the entire quest chain.";
+    const WARNING_COMPLETE_QUEST_CHAIN: &str =
+        "Completing a main quest will complete the entire quest chain.";
+    const WARNING_DELETE_QUEST: &str =
+        "Deleting a quest will permanently delete the quest and its secondary quests.";
+
     /// Interprets the parsed arguments from the command line.
     pub fn interpret(args: Args) {
         match args.command() {
@@ -139,7 +148,7 @@ impl Cli {
         let database = Database::new();
         let conn = database.conn();
         let quest_dao = QuestDao::new(&conn);
-        let mut quest = quest_dao.get(quest_id);
+        let quest = quest_dao.get_quest(quest_id);
 
         // Check if the quest is already abandoned.
         if quest.status() == Status::Abandoned {
@@ -147,18 +156,16 @@ impl Cli {
             return;
         }
 
-        // Ask for confirmation before abandoning a main quest with at least one secondary quest.
-        // if quest.is_main() && quest_dao.num_quests(quest.id()) > 0 {
-        //     let message = "Abandoning a main quest will abandon the entire quest chain.";
-        //     if !Self::confirmation_warning(message) {
-        //         println!("Quest {} not abandoned.", quest_id);
-        //         return;
-        //     }
-        // }
+        // Always ask for confirmation before accepting a quest chain.
+        if quest_dao.is_main_quest(quest_id)
+            && !Self::confirmation_warning(Self::WARNING_ABANDON_QUEST_CHAIN)
+        {
+            println!("Quest {} not accepted.", quest_id);
+            return;
+        }
 
-        *quest.status_mut() = Status::Abandoned;
-        quest_dao.update(&quest);
-        println!("Abandoned quest {}!", quest_id);
+        quest_dao.update_chain_status(quest_id, Status::Abandoned);
+        println!("Quest {} abandoned.", quest_id);
     }
 
     /// Accepts the specified quest.
@@ -169,15 +176,22 @@ impl Cli {
 
         // Update the quest status to ongoing.
         let quest_dao = QuestDao::new(&conn);
-        let mut quest = quest_dao.get(quest_id);
+        let quest = quest_dao.get_quest(quest_id);
 
         if quest.status() == Status::Ongoing {
-            println!("Quest is already accepted");
+            println!("Quest is already accepted.");
             return;
         }
 
-        *quest.status_mut() = Status::Ongoing;
-        quest_dao.update(&quest);
+        // Always ask for confirmation before accepting a quest chain.
+        if quest_dao.is_main_quest(quest_id)
+            && !Self::confirmation_warning(Self::WARNING_ACCEPT_QUEST_CHAIN)
+        {
+            println!("Quest {} not accepted.", quest_id);
+            return;
+        }
+
+        quest_dao.update_chain_status(quest_id, Status::Ongoing);
         println!("Quest {} accepted!", quest_id);
     }
 
@@ -201,27 +215,41 @@ impl Cli {
 
         // Update the quest status to completed.
         let quest_dao = QuestDao::new(&conn);
-        let mut quest = quest_dao.get(quest_id);
+        let quest = quest_dao.get_quest(quest_id);
 
         if quest.status() == Status::Completed {
-            println!("Quest is already completed");
+            println!("Quest is already completed.");
             return;
         }
 
-        *quest.status_mut() = Status::Completed;
-        quest_dao.update(&quest);
+        // Always ask for confirmation before completing a quest chain.
+        if quest_dao.is_main_quest(quest_id)
+            && !Self::confirmation_warning(Self::WARNING_COMPLETE_QUEST_CHAIN)
+        {
+            println!("Quest {} not completed.", quest_id);
+            return;
+        }
+
+        quest_dao.update_chain_status(quest_id, Status::Completed);
         println!("Quest {} completed!", quest_id);
     }
 
-    /// Deletes a quest from the log.
+    /// Deletes a quest, and its secondary quests, from the log.
     fn delete_quest(quest_id: i64) {
         // Open the database connection.
         let database = Database::new();
         let conn = database.conn();
 
-        // Delete the quest.
+        // Always ask for confirmation before deleting a quest.
+        if !Self::confirmation_warning(Self::WARNING_DELETE_QUEST) {
+            println!("Quest {} not deleted.", quest_id);
+            return;
+        }
+
+        // Delete the quest (chain).
         let quest_dao = QuestDao::new(&conn);
-        quest_dao.delete(quest_id);
+        quest_dao.delete_chain(quest_id);
+        println!("Quest {} deleted.", quest_id);
     }
 
     /// Populates the table with quest chains, where each secondary quest chain
@@ -236,7 +264,7 @@ impl Cli {
         // Prepended to the quest objective. Necessary to show the chain connections and depth.
         let mut prefix = String::new();
 
-        // Check if quest chains are nested 
+        // Check if quest chains are nested
         for &is_nested in &is_depth_nested[..depth] {
             if is_nested {
                 prefix.push_str("│   ");
@@ -315,7 +343,7 @@ impl Cli {
             for (chain_idx, child_chain) in chain.chains().iter().enumerate() {
                 Self::populate_table(
                     child_chain,
-                    0, // Chain depth.
+                    0,                                     // Chain depth.
                     chain_idx == chain.chains().len() - 1, // Is terminal chain.
                     &mut vec![],
                     &mut table,
@@ -325,5 +353,4 @@ impl Cli {
 
         table.show();
     }
-
 }
