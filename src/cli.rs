@@ -90,8 +90,6 @@ pub struct Cli;
 impl Cli {
     const WARNING_ABANDON_QUEST_CHAIN: &str =
         "Abandoning a main quest will abandon the entire quest chain.";
-    const WARNING_ACCEPT_QUEST_CHAIN: &str =
-        "Accepting a main quest will accept the entire quest chain.";
     const WARNING_COMPLETE_QUEST_CHAIN: &str =
         "Completing a main quest will complete the entire quest chain.";
     const WARNING_DELETE_QUEST: &str =
@@ -160,7 +158,7 @@ impl Cli {
         if quest_dao.is_main_quest(quest_id)
             && !Self::confirmation_warning(Self::WARNING_ABANDON_QUEST_CHAIN)
         {
-            println!("Quest {} not accepted.", quest_id);
+            println!("Quest {} not abandoned.", quest_id);
             return;
         }
 
@@ -176,22 +174,16 @@ impl Cli {
 
         // Update the quest status to ongoing.
         let quest_dao = QuestDao::new(&conn);
-        let quest = quest_dao.get_quest(quest_id);
+        let mut quest = quest_dao.get_quest(quest_id);
 
+        // Check if the quest is already accepted.
         if quest.status() == Status::Ongoing {
             println!("Quest is already accepted.");
             return;
         }
 
-        // Always ask for confirmation before accepting a quest chain.
-        if quest_dao.is_main_quest(quest_id)
-            && !Self::confirmation_warning(Self::WARNING_ACCEPT_QUEST_CHAIN)
-        {
-            println!("Quest {} not accepted.", quest_id);
-            return;
-        }
-
-        quest_dao.update_chain_status(quest_id, Status::Ongoing);
+        *quest.status_mut() = Status::Ongoing;
+        quest_dao.update_quest(&quest);
         println!("Quest {} accepted!", quest_id);
     }
 
@@ -204,7 +196,7 @@ impl Cli {
         // Construct and save the quest.
         let quest = Quest::new(objective.trim().to_owned(), status, tier, chain_id);
         let quest_dao = QuestDao::new(&conn);
-        quest_dao.add(&quest);
+        quest_dao.add_quest(&quest);
     }
 
     /// Completes a quest.
@@ -320,7 +312,7 @@ impl Cli {
 
         // Get all quest chains from the log.
         let quest_dao = QuestDao::new(&conn);
-        let chains = quest_dao.chains();
+        let chains = quest_dao.get_all_chains();
 
         // Populate and show the table.
         let columns: Vec<Cell> = vec![
