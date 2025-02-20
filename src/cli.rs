@@ -82,9 +82,28 @@ enum Command {
     /// Show all quests  
     #[command(long_about)]
     Log,
+
+    /// Modify a quest
+    #[command(long_about)]
+    Modify {
+        /// Quest ID
+        quest_id: i64,
+
+        /// Objective
+        #[arg(long, short, value_enum)]
+        objective: Option<String>,
+
+        /// Status
+        #[arg(long, short, value_enum)]
+        status: Option<Status>,
+
+        /// Tier
+        #[arg(long, short, value_enum)]
+        tier: Option<Tier>,
+    },
 }
 
-/// The CLI interpretter.
+/// The CLI interpreter.
 pub struct Cli;
 
 impl Cli {
@@ -120,6 +139,14 @@ impl Cli {
             }
             Command::Log => {
                 Self::show_quests();
+            }
+            Command::Modify {
+                quest_id,
+                objective,
+                status,
+                tier,
+            } => {
+                Self::modify_quest(quest_id, objective, status, tier);
             }
         }
     }
@@ -242,6 +269,37 @@ impl Cli {
         let quest_dao = QuestDao::new(&conn);
         quest_dao.delete_chain(quest_id);
         println!("Quest {} deleted.", quest_id);
+    }
+
+    /// Modifies a quest from the log.
+    fn modify_quest(
+        quest_id: i64,
+        objective: Option<String>,
+        status: Option<Status>,
+        tier: Option<Tier>,
+    ) {
+        // Open the database connection.
+        let database = Database::new();
+        let conn = database.conn();
+
+        // Update the modified fields.
+        let quest_dao = QuestDao::new(&conn);
+        let mut quest = quest_dao.get_quest(quest_id);
+
+        if let Some(objective) = objective {
+            *quest.objective_mut() = objective;
+        }
+
+        if let Some(status) = status {
+            *quest.status_mut() = status;
+        }
+
+        if let Some(tier) = tier {
+            *quest.tier_mut() = tier;
+        }
+
+        quest_dao.update_quest(&quest);
+        println!("Quest {} modified.", quest_id);
     }
 
     /// Populates the table with quest chains, where each secondary quest chain

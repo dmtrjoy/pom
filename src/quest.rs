@@ -80,12 +80,17 @@ impl Quest {
         &self.objective
     }
 
+    /// Borrows a mutable reference to the objective.
+    pub fn objective_mut(&mut self) -> &mut String {
+        &mut self.objective
+    }
+
     /// Copies the status.
     pub fn status(&self) -> Status {
         self.status
     }
 
-    /// Borrows a mutable reference of the status.
+    /// Borrows a mutable reference to the status.
     pub fn status_mut(&mut self) -> &mut Status {
         &mut self.status
     }
@@ -93,6 +98,11 @@ impl Quest {
     /// Copies the tier.
     pub fn tier(&self) -> Tier {
         self.tier
+    }
+
+    /// Borrows a mutable reference to the tier.
+    pub fn tier_mut(&mut self) -> &mut Tier {
+        &mut self.tier
     }
 
     /// Constructs a new quest.
